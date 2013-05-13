@@ -3,21 +3,31 @@ Execution time comparison.
 
 Go:
 
-    λ time ./pi
+    λ ./pi
     3.1416426510898874
-    ./pi  0.04s user 0.03s system 88% cpu 0.080 total
+    0.065972
+    # 0.065972 seconds
 
-Elixir[raw processes]:
+Elixir:
 
-    λ time mix run 'IO.puts PiNative.approx(20000)'
-    3.14154091392784406978e+00
-    mix run 'IO.puts PiNative.approx(20000)'  0.57s user 0.24s system 162% cpu 0.497 total
+    λ ERL_COMPILER_OPTIONS="native" mix compile
+    Compiled lib/examples/pi.ex
+    Compiled lib/gochan.ex
+    Generated gochan.app
 
-Elixir[gochan]:
+[raw processes]:
 
-    λ time mix run 'IO.puts Pi.approx(20000)'
+    λ erl -pa /Users/alco/Documents/git/elixir/lib/*/ebin -pa ebin -noshell -s Elixir-PiNative run -s init stop
+    3.14174275369505640043e+00
+    {192138,:ok}
+    # 0.192138 seconds
+
+[gochan]:
+
+    λ erl -pa /Users/alco/Documents/git/elixir/lib/*/ebin -pa ebin -noshell -s Elixir-Pi run -s init stop
     3.14164265108988693953e+00
-    mix run 'IO.puts Pi.approx(20000)'  3.86s user 0.90s system 215% cpu 2.212 total
+    {2357628,:ok}
+    # 2.357628 seconds
 
 """
 
@@ -33,11 +43,14 @@ package main
 import (
 	"fmt"
 	"math"
+	"time"
 )
 
 func main() {
+	ts := time.Now()
 	fmt.Println(pi(20000))
-}
+	fmt.Println(time.Now().Sub(ts).Seconds())
+)
 
 // pi launches n goroutines to compute an
 // approximation of pi.
@@ -59,6 +72,10 @@ func term(ch chan float64, k float64) {
 """
 
 defmodule PiNative do
+  def run() do
+    IO.inspect :timer.tc fn -> IO.puts approx(20000) end
+  end
+
   def reduce(0, acc) do
     acc
   end
@@ -84,6 +101,10 @@ defmodule PiNative do
 end
 
 defmodule Pi do
+  def run() do
+    IO.inspect :timer.tc fn -> IO.puts approx(20000) end
+  end
+
   @doc """
   Launches n concurrent processes to compute an approximation of pi.
   """
