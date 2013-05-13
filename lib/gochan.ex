@@ -167,12 +167,16 @@ defmodule ChanBufProcess do
 
   defp update_writers(state=ChanBufState[writers: []]), do: state
   defp update_writers(state=ChanBufState[writers: [{from, ref, data}|wt]]) do
-    if length(state.buffer) < state.cap do
-      from <- { :ok, ref }
-      update_writers(state.update_buffer(&1 ++ [data]).writers(wt))
-    else
-      state
-    end
+    # We assume that length(state.buffer) == state.cap - 1
+    from <- { :ok, ref }
+    state.update_buffer(&1 ++ [data]).writers(wt)
+
+    #if length(state.buffer) < state.cap do
+      #from <- { :ok, ref }
+      #update_writers(state.update_buffer(&1 ++ [data]).writers(wt))
+    #else
+      #state
+    #end
   end
 end
 
