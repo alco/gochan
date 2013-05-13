@@ -8,7 +8,7 @@ defmodule Chan do
   writing to it will block the writing process until someone reads from the
   channel on the other end.
   """
-  def new(0) do
+  def new() do
     spawn(ChanProcess, :init, [])
   end
 
@@ -31,7 +31,7 @@ defmodule Chan do
 
   def write(chan, data) do
     ref = make_ref()
-    chan <- { :write, self(), ref, data }
+    chan <- { :write, {self(), ref, data} }
     # Check that the channel exists
     mref = Process.monitor(chan)
     result = receive do
@@ -59,7 +59,7 @@ defmodule Chan do
 
   def read(chan) do
     ref = make_ref()
-    chan <- { :read, self(), ref }
+    chan <- { :read, {self(), ref} }
     # Check that the channel exists
     mref = Process.monitor(chan)
     result = receive do
@@ -83,19 +83,16 @@ defmodule Chan do
   end
 end
 
-defmodule ChanProcessBuf do
-end
-
-defmodule ChanProcess do
-  defrecord ChanState, buffer_size: 0, buffer: [], waiting: [], blocking: []
+defmodule ChanBufProcess do
+  defrecord ChanBufState, buffer_size: 0, buffer: [], waiting: [], blocking: []
 
   def init(buffer_size) do
-    loop(ChanState.new(buffer_size: buffer_size))
+    loop(ChanBufState.new(buffer_size: buffer_size))
   end
 
-  def loop(state=ChanState[]) do
+  def loop(state=ChanBufState[]) do
     receive do
-      { :write, from, ref, data } ->
+      { :write, msg={from, ref, data} } ->
         if match?([{reader, rref}|t], state.waiting) do
           # Someone is already waiting on the channel, so we can unblock the sender
           reader <- { :ok, rref, data }
@@ -103,10 +100,10 @@ defmodule ChanProcess do
           loop(state.waiting(t))
         else
           # Add the sender on the blocking list
-          loop(enqueue_write(state, from, ref, data))
+          loop(state.update_blocking(&1 ++ [msg]))
         end
 
-      { :read, from, ref } ->
+      { :read, msg={from, ref} } ->
         cond do
           match?([h|t], state.buffer) ->
             # Got a value in the buffer. Send it over and check if we need to unblock any writers.
@@ -121,7 +118,7 @@ defmodule ChanProcess do
 
           true ->
             # Add sender to the waiting list
-            loop(state.update_waiting(&1 ++ [{from, ref}]))
+            loop(state.update_waiting(&1 ++ [msg]))
         end
 
       :close ->
@@ -130,12 +127,46 @@ defmodule ChanProcess do
     end
   end
 
-  def enqueue_write(state=ChanState[], from, ref, data) do
-    state.update_blocking(&1 ++ [{from, ref, data}])
+  defp update_writers(state) do
+    state
+  end
+end
+
+defmodule ChanProcess do
+  defrecord ChanState, readers: [], writers: []
+
+  def init() do
+    loop(ChanState.new())
   end
 
-  def update_writers(state) do
-    state
+  def loop(state=ChanState[]) do
+    receive do
+      { :write, msg={from, ref, data} } ->
+        if match?([{reader, rref}|t], state.readers) do
+          # Someone is already waiting on the channel, so we can unblock the sender
+          reader <- { :ok, rref, data }
+          from <- { :ok, ref }
+          loop(state.readers(t))
+        else
+          # Add the sender to the writers list
+          loop(state.update_writers(&1 ++ [msg]))
+        end
+
+      { :read, msg={from, ref} } ->
+        if match?([{writer, wref, data}|t], state.writers) do
+          # Someone is waiting in the writing state. Get their value and send them a confirmation.
+          writer <- { :ok, wref }
+          from <- { :ok, ref, data }
+          loop(state.writers(t))
+        else
+          # Add sender to the readers list
+          loop(state.update_readers(&1 ++ [msg]))
+        end
+
+      :close ->
+        # quit the process
+        :ok
+    end
   end
 end
 
