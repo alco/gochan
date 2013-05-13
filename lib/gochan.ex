@@ -5,44 +5,85 @@ defmodule Chan do
 
   @doc """
   Returns a new channel. If `buffer_size` is 0, the channel is unbuffered and
-  writing to it will block the writing process until someone will read from the
+  writing to it will block the writing process until someone reads from the
   channel on the other end.
   """
-  def new(buffer_size // 0) do
-    spawn(ChanProcess, :init, [buffer_size])
+  def new(0) do
+    spawn(ChanProcess, :init, [])
+  end
+
+  def new(buffer_size) do
+    spawn(ChanBufProcess, :init, [buffer_size])
   end
 
   @doc """
   Writes data to the channel. Blocks 1) if the channel is non-buffered and
   nobody is receiving from it or 2) if the buffer is full.
+
+  Writing to a closed channel raises RuntimeError.
+
+  Writing to a nil channel blocks forever.
   """
+  def write(nil, _) do
+    #receive do
+    #end
+  end
+
   def write(chan, data) do
     ref = make_ref()
     chan <- { :write, self(), ref, data }
-    receive do
-      { :ok, ^ref } -> :ok
+    # Check that the channel exists
+    mref = Process.monitor(chan)
+    result = receive do
+      { :DOWN, ^mref, _, _, _ } ->
+        raise "Channel is closed"
+
+      { :ok, ^ref } ->
+        :ok
     end
+    Process.demonitor(mref)
+    result
   end
 
   @doc """
   Reads from the channel. Blocks until data is available.
+
+  Reading from a nil channel blocks forever.
+
+  Reading from a closed channel returns nil.
   """
+  def read(nil) do
+    #receive do
+    #end
+  end
+
   def read(chan) do
     ref = make_ref()
     chan <- { :read, self(), ref }
-    receive do
+    # Check that the channel exists
+    mref = Process.monitor(chan)
+    result = receive do
+      { :DOWN, ^mref, _, _, _ } ->
+        nil
+
       { :ok, ^ref, data } ->
         data
     end
+    Process.demonitor(mref)
+    result
   end
 
   @doc """
   Closes the channel making all currently waiting receivers receive nil.
-  Writing to a closed channel will block forever (unlike Go, which would produce a runtime panic).
+  Reading from a closed channel returns :closed immediately.
+  Writing to a closed channel raises.
   """
   def close(chan) do
     chan <- :close
   end
+end
+
+defmodule ChanProcessBuf do
 end
 
 defmodule ChanProcess do
