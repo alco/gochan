@@ -121,6 +121,26 @@ defmodule Chan do
   end
 end
 
+defmodule Queue do
+  def new do
+    :queue.new
+  end
+
+  def put(q, val) do
+    :queue.in(val, q)
+  end
+
+  def get(q) do
+    case :queue.out(q) do
+      { :empty, _ } ->
+        nil
+
+      { {:value, val}, queue } ->
+        { val, queue }
+    end
+  end
+end
+
 defmodule ChanBufProcess do
   defrecord ChanBufState, cap: 0, buffer: [], readers: [], writers: []
 
@@ -181,7 +201,7 @@ defmodule ChanBufProcess do
 end
 
 defmodule ChanProcess do
-  defrecord ChanState, readers: :queue.new(), writers: :queue.new()
+  defrecord ChanState, readers: Queue.new(), writers: Queue.new()
 
   def init() do
     loop(ChanState.new())
@@ -190,29 +210,25 @@ defmodule ChanProcess do
   def loop(state=ChanState[]) do
     receive do
       { :write, msg={from, ref, data} } ->
-        case :queue.out(state.readers) do
-          { :empty, _ } ->
-            # Add the sender to the writers list
-            loop(state.update_writers(:queue.in(msg, &1)))
-
-          { {:value, {reader, rref}}, queue } ->
-            # Someone is already waiting on the channel, so we can unblock the sender
-            reader <- { :ok, rref, data }
-            from <- { :ok, ref }
-            loop(state.readers(queue))
+        if match?({ {reader, rref}, t }, Queue.get(state.readers)) do
+          # Someone is already waiting on the channel, so we can unblock the sender
+          reader <- { :ok, rref, data }
+          from <- { :ok, ref }
+          loop(state.readers(t))
+        else
+          # Add the sender to the writers list
+          loop(state.update_writers(Queue.put(&1, msg)))
         end
 
       { :read, msg={from, ref} } ->
-        case :queue.out(state.writers) do
-          { :empty, _ } ->
-            # Add sender to the readers list
-            loop(state.update_readers(:queue.in(msg, &1)))
-
-          { {:value, {writer, wref, data}}, queue } ->
-            # Someone is waiting in the writing state. Get their value and send them a confirmation.
-            writer <- { :ok, wref }
-            from <- { :ok, ref, data }
-            loop(state.writers(queue))
+        if match?({ {writer, wref, data}, t }, Queue.get(state.writers)) do
+          # Someone is waiting in the writing state. Get their value and send them a confirmation.
+          writer <- { :ok, wref }
+          from <- { :ok, ref, data }
+          loop(state.writers(t))
+        else
+          # Add sender to the readers list
+          loop(state.update_readers(Queue.put(&1, msg)))
         end
 
       :close ->
