@@ -181,7 +181,7 @@ defmodule ChanBufProcess do
 end
 
 defmodule ChanProcess do
-  defrecord ChanState, readers: [], writers: []
+  defrecord ChanState, readers: :queue.new(), writers: :queue.new()
 
   def init() do
     loop(ChanState.new())
@@ -190,25 +190,29 @@ defmodule ChanProcess do
   def loop(state=ChanState[]) do
     receive do
       { :write, msg={from, ref, data} } ->
-        if match?([{reader, rref}|t], state.readers) do
-          # Someone is already waiting on the channel, so we can unblock the sender
-          reader <- { :ok, rref, data }
-          from <- { :ok, ref }
-          loop(state.readers(t))
-        else
-          # Add the sender to the writers list
-          loop(state.update_writers(&1 ++ [msg]))
+        case :queue.out(state.readers) do
+          { :empty, _ } ->
+            # Add the sender to the writers list
+            loop(state.update_writers(:queue.in(msg, &1)))
+
+          { {:value, {reader, rref}}, queue } ->
+            # Someone is already waiting on the channel, so we can unblock the sender
+            reader <- { :ok, rref, data }
+            from <- { :ok, ref }
+            loop(state.readers(queue))
         end
 
       { :read, msg={from, ref} } ->
-        if match?([{writer, wref, data}|t], state.writers) do
-          # Someone is waiting in the writing state. Get their value and send them a confirmation.
-          writer <- { :ok, wref }
-          from <- { :ok, ref, data }
-          loop(state.writers(t))
-        else
-          # Add sender to the readers list
-          loop(state.update_readers(&1 ++ [msg]))
+        case :queue.out(state.writers) do
+          { :empty, _ } ->
+            # Add sender to the readers list
+            loop(state.update_readers(:queue.in(msg, &1)))
+
+          { {:value, {writer, wref, data}}, queue } ->
+            # Someone is waiting in the writing state. Get their value and send them a confirmation.
+            writer <- { :ok, wref }
+            from <- { :ok, ref, data }
+            loop(state.writers(queue))
         end
 
       :close ->
