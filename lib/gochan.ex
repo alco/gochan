@@ -18,7 +18,7 @@ defmodule Chan do
 
   @doc """
   Writes data to the channel. Blocks 1) if the channel is non-buffered and
-  nobody is receiving from it or 2) if the buffer is full.
+  nobody is reading from it or 2) if the buffer is full.
 
   Writing to a closed channel raises RuntimeError.
 
@@ -75,11 +75,26 @@ defmodule Chan do
 
   @doc """
   Closes the channel making all currently waiting receivers receive nil.
-  Reading from a closed channel returns :closed immediately.
+  Closing a nil channel raises.
+
+  Reading from a closed channel returns nil immediately.
+
   Writing to a closed channel raises.
   """
+  def close(nil) do
+    raise "Cannot close a nil channel"
+  end
+
   def close(chan) do
-    chan <- :close
+    # Check that the channel exists
+    mref = Process.monitor(chan)
+    receive do
+      { :DOWN, ^mref, _, _, _ } ->
+        raise "Trying to close an already closed channel"
+
+      after 0 ->
+        chan <- :close
+    end
   end
 end
 
