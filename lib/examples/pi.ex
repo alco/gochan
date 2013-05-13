@@ -4,8 +4,8 @@ Execution time comparison.
 Go:
 
     λ time ./pi
-    3.1417926135957908
-    ./pi  0.01s user 0.01s system 87% cpu 0.027 total
+    3.1416426510898874
+    ./pi  0.04s user 0.03s system 88% cpu 0.080 total
 
 Elixir[raw processes]:
 
