@@ -9,11 +9,11 @@ defmodule Chan do
   channel on the other end.
   """
   def new() do
-    spawn(ChanProcess, :init, [])
+    { spawn(ChanProcess, :init, []), 0 }
   end
 
   def new(buffer_size) do
-    spawn(ChanBufProcess, :init, [buffer_size])
+    { spawn(ChanBufProcess, :init, [buffer_size]), buffer_size }
   end
 
   @doc """
@@ -29,7 +29,7 @@ defmodule Chan do
     #end
   end
 
-  def write(chan, data) do
+  def write({chan, _}, data) do
     ref = make_ref()
     chan <- { :write, {self(), ref, data} }
     # Check that the channel exists
@@ -57,7 +57,7 @@ defmodule Chan do
     #end
   end
 
-  def read(chan) do
+  def read({chan, _}) do
     ref = make_ref()
     chan <- { :read, {self(), ref} }
     # Check that the channel exists
@@ -85,7 +85,7 @@ defmodule Chan do
     raise "Cannot close a nil channel"
   end
 
-  def close(chan) do
+  def close({chan, _}) do
     # Check that the channel exists
     mref = Process.monitor(chan)
     receive do
@@ -94,6 +94,29 @@ defmodule Chan do
 
       after 0 ->
         chan <- :close
+    end
+  end
+
+  @doc """
+  Returns channel's buffer size.
+  """
+  def cap({_, size}) do
+    size
+  end
+
+  @doc """
+  Returns number of elements enqueued in the buffer
+  """
+  def len({chan, size}) do
+    if size == 0 do
+      0
+    else
+      ref = make_ref()
+      chan <- { :len, self(), ref }
+      receive do
+        { :ok, ^ref, length } ->
+          length
+      end
     end
   end
 end
@@ -135,6 +158,9 @@ defmodule ChanBufProcess do
             # Add sender to the waiting list
             loop(state.update_waiting(&1 ++ [msg]))
         end
+
+      { :len, from, ref } ->
+        from <- { :ok, ref, length(state.buffer) }
 
       :close ->
         # do nothing to quit the process
