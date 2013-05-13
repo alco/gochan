@@ -6,12 +6,16 @@ defmodule Chan do
   @doc """
   Returns a new channel. If `buffer_size` is 0, the channel is unbuffered and
   writing to it will block the writing process until someone will read from the
-channel on the other end.
+  channel on the other end.
   """
   def new(buffer_size // 0) do
     spawn(ChanProcess, :init, [buffer_size])
   end
 
+  @doc """
+  Writes data to the channel. Blocks 1) if the channel is non-buffered and
+  nobody is receiving from it or 2) if the buffer is full.
+  """
   def write(chan, data) do
     ref = make_ref()
     chan <- { :write, self(), ref, data }
@@ -20,6 +24,9 @@ channel on the other end.
     end
   end
 
+  @doc """
+  Reads from the channel. Blocks until data is available.
+  """
   def read(chan) do
     ref = make_ref()
     chan <- { :read, self(), ref }
@@ -29,6 +36,10 @@ channel on the other end.
     end
   end
 
+  @doc """
+  Closes the channel making all currently waiting receivers receive nil.
+  Writing to a closed channel will block forever (unlike Go, which would produce a runtime panic).
+  """
   def close(chan) do
     chan <- :close
   end
