@@ -122,45 +122,35 @@ defmodule Chan do
 end
 
 defmodule ChanBufProcess do
-  defrecord ChanBufState, buffer_size: 0, buffer: [], waiting: [], blocking: []
+  defrecord ChanBufState, cap: 0, buffer: [], readers: [], writers: []
 
   def init(buffer_size) do
-    loop(ChanBufState.new(buffer_size: buffer_size))
+    loop(ChanBufState.new(cap: buffer_size))
   end
 
   def loop(state=ChanBufState[]) do
     receive do
       { :write, msg={from, ref, data} } ->
-        if match?([{reader, rref}|t], state.waiting) do
-          # Someone is already waiting on the channel, so we can unblock the sender
-          reader <- { :ok, rref, data }
+        if length(state.buffer) < state.cap do
           from <- { :ok, ref }
-          loop(state.waiting(t))
+          loop(update_readers(state.update_buffer(&1 ++ [data])))
         else
-          # Add the sender on the blocking list
-          loop(state.update_blocking(&1 ++ [msg]))
+          # The buffer if full
+          loop(state.update_writers(&1 ++ [msg]))
         end
 
       { :read, msg={from, ref} } ->
-        cond do
-          match?([h|t], state.buffer) ->
-            # Got a value in the buffer. Send it over and check if we need to unblock any writers.
-            from <- { :ok, ref, h }
-            loop(update_writers(state.buffer(t)))
-
-          match?([{writer, wref, data}|t], state.blocking) ->
-            # Someone is waiting in the writing state. Get their value and send them a confirmation.
-            writer <- { :ok, wref }
-            from <- { :ok, ref, data }
-            loop(state.blocking(t))
-
-          true ->
-            # Add sender to the waiting list
-            loop(state.update_waiting(&1 ++ [msg]))
+        if match?([data|t], state.buffer) do
+          from <- { :ok, ref, data }
+          loop(update_writers(state.buffer(t)))
+        else
+          # The buffer is empty
+          loop(state.update_readers(&1 ++ [msg]))
         end
 
       { :len, from, ref } ->
         from <- { :ok, ref, length(state.buffer) }
+        loop(state)
 
       :close ->
         # do nothing to quit the process
@@ -168,8 +158,21 @@ defmodule ChanBufProcess do
     end
   end
 
-  defp update_writers(state) do
-    state
+  defp update_readers(state=ChanBufState[buffer: []]), do: state
+  defp update_readers(state=ChanBufState[readers: []]), do: state
+  defp update_readers(state=ChanBufState[buffer: [data|bt], readers: [{from, ref}|rt]]) do
+    from <- { :ok, ref, data }
+    update_readers(state.buffer(bt).readers(rt))
+  end
+
+  defp update_writers(state=ChanBufState[writers: []]), do: state
+  defp update_writers(state=ChanBufState[writers: [{from, ref, data}|wt]]) do
+    if length(state.buffer) < state.cap do
+      from <- { :ok, ref }
+      update_writers(state.update_buffer(&1 ++ [data]).writers(wt))
+    else
+      state
+    end
   end
 end
 
