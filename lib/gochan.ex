@@ -93,6 +93,7 @@ defmodule Chan do
         raise "Trying to close an already closed channel"
 
       after 0 ->
+        Process.demonitor(mref)
         chan <- :close
     end
   end
