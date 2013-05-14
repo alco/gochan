@@ -3,6 +3,50 @@ Code.require_file "../test_helper.exs", __FILE__
 defmodule GochanTest do
   use ExUnit.Case
 
+  test "close" do
+    # Make sure nothing is leftover from previous test
+    refute_receive _
+
+    c = Chan.new
+    assert Chan.close(c) == :close
+    refute_receive _
+
+    assert_raise RuntimeError, "Trying to close an already closed channel", fn ->
+      Chan.close(c)
+    end
+
+    # Make sure nothing is leftover after out test
+    refute_receive _
+  end
+
+  test "close read" do
+    # Make sure nothing is leftover from previous test
+    refute_receive _
+
+    c = Chan.new
+    Chan.close(c)
+
+    assert Chan.read(c) == nil
+
+    # Make sure nothing is leftover after out test
+    refute_receive _
+  end
+
+  test "close write" do
+    # Make sure nothing is leftover from previous test
+    refute_receive _
+
+    c = Chan.new
+    Chan.close(c)
+
+    assert_raise RuntimeError, "Channel is closed", fn ->
+      Chan.write(c, :anything)
+    end
+
+    # Make sure nothing is leftover after out test
+    refute_receive _
+  end
+
   test "read block" do
     # Make sure nothing is leftover from previous test
     refute_receive _
