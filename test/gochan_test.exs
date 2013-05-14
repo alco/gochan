@@ -3,15 +3,9 @@ Code.require_file "../test_helper.exs", __FILE__
 defmodule GochanTest do
   use ExUnit.Case
 
-  defp flush() do
-    receive do
-      _ -> flush()
-      after 1 -> :ok
-    end
-  end
-
   test "read block" do
-    flush()
+    # Make sure nothing is leftover from previous test
+    refute_receive _
 
     c = Chan.new
     mypid = self()
@@ -24,10 +18,14 @@ defmodule GochanTest do
 
     Chan.close(c)
     assert Chan.read(c) == nil
+
+    # Make sure nothing is leftover after out test
+    refute_receive _
   end
 
   test "write block" do
-    flush()
+    # Make sure nothing is leftover from previous test
+    refute_receive _
 
     c = Chan.new
     mypid = self()
@@ -41,10 +39,44 @@ defmodule GochanTest do
 
     Chan.close(c)
     assert Chan.read(c) == nil
+
+    # Make sure nothing is leftover after out test
+    refute_receive _
+  end
+
+  test "back and forth" do
+    # Make sure nothing is leftover from previous test
+    refute_receive _
+
+    c = Chan.new
+    mypid = self()
+
+    pid = spawn(fn ->
+      x = Chan.read(c)
+      Chan.write(c, x * 2)
+      y = Chan.read(c)
+      Chan.write(c, y * y)
+      mypid <- {:finished, self()}
+    end)
+    refute_receive _
+
+    Chan.write(c, 4)
+    assert Chan.read(c) == 8
+
+    Chan.write(c, 16)
+    assert Chan.read(c) == 256
+    assert_receive {:finished, ^pid}
+
+    Chan.close(c)
+    assert Chan.read(c) == nil
+
+    # Make sure nothing is leftover after out test
+    refute_receive _
   end
 
   test "multiple readers" do
-    flush()
+    # Make sure nothing is leftover from previous test
+    refute_receive _
 
     c = Chan.new
     mypid = self()
@@ -70,10 +102,14 @@ defmodule GochanTest do
 
     Chan.close(c)
     assert Chan.read(c) == nil
+
+    # Make sure nothing is leftover after out test
+    refute_receive _
   end
 
   test "multiple writers" do
-    flush()
+    # Make sure nothing is leftover from previous test
+    refute_receive _
 
     c = Chan.new
     mypid = self()
@@ -99,6 +135,9 @@ defmodule GochanTest do
 
     Chan.close(c)
     assert Chan.read(c) == nil
+
+    # Make sure nothing is leftover after out test
+    refute_receive _
   end
 end
 
