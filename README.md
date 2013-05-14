@@ -1,4 +1,4 @@
-A "proof of concepts" implementation of [Go channels][1] in Elixir.
+A "proof of concept" implementation of [Go channels][1] in Elixir.
 
   [1]: http://golang.org/doc/effective_go.html#channels
 
@@ -14,7 +14,7 @@ The API is simple: you get the `Chan` module with five methods:
 
 ## The "why"
 
-This is merely a proof of concepts. They are not the same channels as in Go for the following reasons:
+This is merely a proof of concept. They are not the same channels as in Go for the following reasons:
 
 * Go channels are typed, in Elixir they are not.
 * Go channels are built into the language, so they are efficient.
