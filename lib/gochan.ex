@@ -141,66 +141,11 @@ defmodule Queue do
   end
 end
 
-defmodule ChanBufProcess do
-  defrecord ChanBufState, cap: 0, buffer: [], readers: [], writers: []
-
-  def init(buffer_size) do
-    loop(ChanBufState.new(cap: buffer_size))
-  end
-
-  def loop(state=ChanBufState[]) do
-    receive do
-      { :write, msg={from, ref, data} } ->
-        if length(state.buffer) < state.cap do
-          from <- { :ok, ref }
-          loop(update_readers(state.update_buffer(&1 ++ [data])))
-        else
-          # The buffer if full
-          loop(state.update_writers(&1 ++ [msg]))
-        end
-
-      { :read, msg={from, ref} } ->
-        if match?([data|t], state.buffer) do
-          from <- { :ok, ref, data }
-          loop(update_writers(state.buffer(t)))
-        else
-          # The buffer is empty
-          loop(state.update_readers(&1 ++ [msg]))
-        end
-
-      { :len, from, ref } ->
-        from <- { :ok, ref, length(state.buffer) }
-        loop(state)
-
-      :close ->
-        # do nothing to quit the process
-        :ok
-    end
-  end
-
-  defp update_readers(state=ChanBufState[buffer: []]), do: state
-  defp update_readers(state=ChanBufState[readers: []]), do: state
-  defp update_readers(state=ChanBufState[buffer: [data|bt], readers: [{from, ref}|rt]]) do
-    from <- { :ok, ref, data }
-    update_readers(state.buffer(bt).readers(rt))
-  end
-
-  defp update_writers(state=ChanBufState[writers: []]), do: state
-  defp update_writers(state=ChanBufState[writers: [{from, ref, data}|wt]]) do
-    # We assume that length(state.buffer) == state.cap - 1
-    from <- { :ok, ref }
-    state.update_buffer(&1 ++ [data]).writers(wt)
-
-    #if length(state.buffer) < state.cap do
-      #from <- { :ok, ref }
-      #update_writers(state.update_buffer(&1 ++ [data]).writers(wt))
-    #else
-      #state
-    #end
-  end
-end
-
 defmodule ChanProcess do
+  @moduledoc """
+  Channel process for unbuffered channels.
+  """
+
   defrecord ChanState, readers: Queue.new(), writers: Queue.new()
 
   def init() do
@@ -238,67 +183,68 @@ defmodule ChanProcess do
   end
 end
 
-defmodule ChanTest do
-  def test_read_block() do
-    c = Chan.new
-    mypid = self()
 
-    IO.puts "My pid = #{inspect mypid}; chan pid = #{inspect c}"
+defmodule ChanBufProcess do
+  @moduledoc """
+  Channel process for buffered channels.
+  """
 
-    pid = spawn(fn -> mypid <- { :ok_read, Chan.read(c) } end)
+  defrecord ChanState, cap: 0, buffer: [], readers: [], writers: []
 
-    IO.puts "Spawned a reader at #{inspect pid}"
+  def init(buffer_size) do
+    loop(ChanState.new(cap: buffer_size))
+  end
 
+  def loop(state=ChanState[]) do
     receive do
-      x ->
-        raise "Error: received #{inspect x}"
-      after 500 ->
+      { :write, msg={from, ref, data} } ->
+        if length(state.buffer) < state.cap do
+          from <- { :ok, ref }
+          loop(update_readers(state.update_buffer(&1 ++ [data])))
+        else
+          # The buffer if full
+          loop(state.update_writers(&1 ++ [msg]))
+        end
+
+      { :read, msg={from, ref} } ->
+        if match?([data|t], state.buffer) do
+          from <- { :ok, ref, data }
+          loop(update_writers(state.buffer(t)))
+        else
+          # The buffer is empty
+          loop(state.update_readers(&1 ++ [msg]))
+        end
+
+      { :len, from, ref } ->
+        from <- { :ok, ref, length(state.buffer) }
+        loop(state)
+
+      :close ->
+        # do nothing to quit the process
         :ok
     end
-
-    IO.puts "writing to chan"
-    Chan.write(c, "hello")
-    receive do
-      { :ok_read, msg } ->
-        IO.puts "Received #{msg}"
-    end
   end
 
-  def test_write_block() do
-    c = Chan.new
-    mypid = self()
-
-    IO.puts "My pid = #{inspect mypid}; chan pid = #{inspect c}"
-
-    pid = spawn(fn -> Chan.write(c, "who's there?"); IO.puts "writer finished" end)
-
-    IO.puts "Spawned a writer at #{inspect pid}"
-
-    msg = Chan.read(c)
-    IO.puts msg
+  defp update_readers(state=ChanState[buffer: []]), do: state
+  defp update_readers(state=ChanState[readers: []]), do: state
+  defp update_readers(state=ChanState[buffer: [data|bt], readers: [{from, ref}|rt]]) do
+    from <- { :ok, ref, data }
+    update_readers(state.buffer(bt).readers(rt))
   end
 
-  def test_multiple_readers() do
-    c = Chan.new
+  defp update_writers(state=ChanState[writers: []]), do: state
+  defp update_writers(state=ChanState[writers: [{from, ref, data}|wt]]) do
+    # We assume that length(state.buffer) == state.cap - 1
+    from <- { :ok, ref }
+    state.update_buffer(&1 ++ [data]).writers(wt)
 
-    Enum.each 1..3, fn _ ->
-      spawn fn -> IO.puts Chan.read(c) end
-    end
-
-    Chan.write(c, "1")
-    Chan.write(c, "2")
-    Chan.write(c, "3")
-  end
-
-  def test_multiple_writers() do
-    c = Chan.new
-
-    Enum.each 1..3, fn x ->
-      spawn fn -> IO.puts Chan.write(c, x) end
-    end
-
-    IO.puts Chan.read(c)
-    IO.puts Chan.read(c)
-    IO.puts Chan.read(c)
+    #if length(state.buffer) < state.cap do
+      #from <- { :ok, ref }
+      #update_writers(state.update_buffer(&1 ++ [data]).writers(wt))
+    #else
+      #state
+    #end
   end
 end
+
+
