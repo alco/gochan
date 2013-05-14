@@ -59,6 +59,7 @@ defmodule GochanTest do
 
     Chan.write(c, "hello")
     assert_receive { :ok_read, ^pid, "hello" }
+    refute_receive _
 
     Chan.close(c)
     assert Chan.read(c) == nil
@@ -80,6 +81,7 @@ defmodule GochanTest do
     msg = Chan.read(c)
     assert msg == "who's there?"
     assert_receive {:finished, ^pid}
+    refute_receive _
 
     Chan.close(c)
     assert Chan.read(c) == nil
@@ -106,10 +108,12 @@ defmodule GochanTest do
 
     Chan.write(c, 4)
     assert Chan.read(c) == 8
+    refute_receive _
 
     Chan.write(c, 16)
     assert Chan.read(c) == 256
     assert_receive {:finished, ^pid}
+    refute_receive _
 
     Chan.close(c)
     assert Chan.read(c) == nil
@@ -133,16 +137,19 @@ defmodule GochanTest do
     [pid|t] = pids
     Chan.write(c, "1")
     assert_receive {1, ^pid, "1"}
+    refute_receive _
     pids = t
 
     [pid|t] = pids
     Chan.write(c, "2")
     assert_receive {2, ^pid, "2"}
+    refute_receive _
     pids = t
 
     [pid|_] = pids
     Chan.write(c, "3")
     assert_receive {3, ^pid, "3"}
+    refute_receive _
 
     Chan.close(c)
     assert Chan.read(c) == nil
@@ -166,16 +173,19 @@ defmodule GochanTest do
     [pid|t] = pids
     assert Chan.read(c) == 1
     assert_receive {1, ^pid, :finished}
+    refute_receive _
     pids = t
 
     [pid|t] = pids
     assert Chan.read(c) == 2
     assert_receive {2, ^pid, :finished}
+    refute_receive _
     pids = t
 
     [pid|_] = pids
     assert Chan.read(c) == 3
     assert_receive {3, ^pid, :finished}
+    refute_receive _
 
     Chan.close(c)
     assert Chan.read(c) == nil
