@@ -120,6 +120,50 @@ defmodule Chan do
       end
     end
   end
+
+  defmacro select([do: {:->, _, clauses}]) when is_list(clauses) do
+    new_clauses = Enum.reduce clauses, [], fn(clause, acc) ->
+      q = case clause do
+        { [{:<-, _, [left, right]}], body } ->
+          # Convert chan <- value to Chan.fast_write(chan, value)
+          quote do
+            if :ok == Chan.fast_write(unquote(left), unquote(right)) do
+              f.({:return, unquote(body)})
+            end
+          end
+
+        { [{:<=, _, [left, right]}], body } ->
+          # Convert var <= chan to var = Chan.fast_read(chan)
+          quote do
+            case Chan.fast_read(unquote(right)) do
+              { :ok, unquote(left) } ->
+                f.({:return, unquote(body)})
+            end
+          end
+
+        { [:default], body } ->
+          quote do
+            f.({:return, unquote(body)})
+          end
+      end
+      [q | acc]
+    end
+    new_clauses = Enum.reverse(new_clauses)
+    quote do
+      f = fn(f) ->
+        case f do
+          { :return, val } ->
+            val
+
+          f ->
+            unquote_splicing(new_clauses)
+            :timer.sleep(1)
+            f.(f)
+        end
+      end
+      f.(f)
+    end
+  end
 end
 
 defmodule Queue do
