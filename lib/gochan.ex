@@ -121,6 +121,26 @@ defmodule Chan do
     end
   end
 
+
+  def fast_read({chan, _}) do
+    ref = make_ref()
+    chan <- { :fast_read, {self(), ref} }
+    # Check that the channel exists
+    mref = Process.monitor(chan)
+    result = receive do
+      { :DOWN, ^mref, _, _, _ } ->
+        nil
+
+      { :ok, ^ref, data } ->
+        { :ok, data }
+
+      { :nodata, ^ref } ->
+        :nodata
+    end
+    Process.demonitor(mref)
+    result
+  end
+
   defmacro select([do: {:->, _, clauses}]) when is_list(clauses) do
     new_clauses = Enum.reduce clauses, [], fn(clause, acc) ->
       q = case clause do
@@ -128,7 +148,7 @@ defmodule Chan do
           # Convert chan <- value to Chan.fast_write(chan, value)
           quote do
             if :ok == Chan.fast_write(unquote(left), unquote(right)) do
-              f.({:return, unquote(body)})
+              throw {:return, unquote(body)}
             end
           end
 
@@ -137,13 +157,15 @@ defmodule Chan do
           quote do
             case Chan.fast_read(unquote(right)) do
               { :ok, unquote(left) } ->
-                f.({:return, unquote(body)})
+                throw {:return, unquote(body)}
+              :nodata ->
+                nil
             end
           end
 
         { [:default], body } ->
           quote do
-            f.({:return, unquote(body)})
+            throw {:return, unquote(body)}
           end
       end
       [q | acc]
@@ -151,14 +173,13 @@ defmodule Chan do
     new_clauses = Enum.reverse(new_clauses)
     quote do
       f = fn(f) ->
-        case f do
-          { :return, val } ->
-            val
-
-          f ->
-            unquote_splicing(new_clauses)
-            :timer.sleep(1)
-            f.(f)
+        try do
+          unquote_splicing(new_clauses)
+          :timer.sleep(1)
+          f.(f)
+        catch
+          { :return, result } ->
+            result
         end
       end
       f.(f)
@@ -219,6 +240,16 @@ defmodule ChanProcess do
         else
           # Add sender to the readers list
           loop(state.update_readers(Queue.put(&1, msg)))
+        end
+
+      { :fast_read, {from, ref} } ->
+        if match?({ {writer, wref, data}, t }, Queue.get(state.writers)) do
+          writer <- { :ok, wref }
+          from <- { :ok, ref, data }
+          loop(state.writers(t))
+        else
+          from <- { :nodata, ref }
+          loop(state)
         end
 
       :close ->
