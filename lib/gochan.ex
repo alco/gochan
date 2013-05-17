@@ -29,9 +29,17 @@ defmodule Chan do
     #end
   end
 
-  def write({chan, _}, data) do
+  def write(chan, data) do
+    write(chan, data, true)
+  end
+
+  def fast_write(chan, data) do
+    write(chan, data, false)
+  end
+
+  defp write({chan, _}, data, should_block) do
     ref = make_ref()
-    chan <- { :write, {self(), ref, data} }
+    chan <- { :write, {self(), ref, data}, should_block }
     # Check that the channel exists
     mref = Process.monitor(chan)
     result = receive do
@@ -40,6 +48,9 @@ defmodule Chan do
 
       { :ok, ^ref } ->
         :ok
+
+      { :empty, ^ref } ->
+        :empty
     end
     Process.demonitor(mref)
     result
@@ -57,9 +68,17 @@ defmodule Chan do
     #end
   end
 
-  def read({chan, _}) do
+  def read(chan) do
+    read(chan, true)
+  end
+
+  def fast_read(chan) do
+    read(chan, false)
+  end
+
+  defp read({chan, _}, should_block) do
     ref = make_ref()
-    chan <- { :read, {self(), ref} }
+    chan <- { :read, {self(), ref}, should_block }
     # Check that the channel exists
     mref = Process.monitor(chan)
     result = receive do
@@ -68,6 +87,9 @@ defmodule Chan do
 
       { :ok, ^ref, data } ->
         data
+
+      { :empty, ^ref } ->
+        :empty
     end
     Process.demonitor(mref)
     result
@@ -121,44 +143,7 @@ defmodule Chan do
     end
   end
 
-
-  def fast_read({chan, _}) do
-    ref = make_ref()
-    chan <- { :fast_read, {self(), ref} }
-    # Check that the channel exists
-    mref = Process.monitor(chan)
-    result = receive do
-      { :DOWN, ^mref, _, _, _ } ->
-        nil
-
-      { :ok, ^ref, data } ->
-        { :ok, data }
-
-      { :nodata, ^ref } ->
-        :nodata
-    end
-    Process.demonitor(mref)
-    result
-  end
-
-  def fast_write({chan, _}, data) do
-    ref = make_ref()
-    chan <- { :fast_write, {self(), ref, data} }
-    # Check that the channel exists
-    mref = Process.monitor(chan)
-    result = receive do
-      { :DOWN, ^mref, _, _, _ } ->
-        raise "Channel is closed"
-
-      { :ok, ^ref } ->
-        :ok
-
-      { :noreaders, ^ref } ->
-        :noreaders
-    end
-    Process.demonitor(mref)
-    result
-  end
+  ###
 
   defp new_var() do
     num = if x = Process.get(:chan_var) do
@@ -197,10 +182,8 @@ defmodule Chan do
           # Convert chan <- value to Chan.fast_write(chan, value)
           quote do
             case Chan.fast_write(unquote(left), unquote(right)) do
-              :ok ->
-                throw {:return, unquote(body)}
-              :noreaders ->
-                nil
+              :ok -> throw {:return, unquote(body)}
+              _ -> nil
             end
           end
 
@@ -208,10 +191,8 @@ defmodule Chan do
           # Convert var <= chan to var = Chan.fast_read(chan)
           quote do
             case Chan.fast_read(unquote(right)) do
-              { :ok, unquote(left) } ->
-                throw {:return, unquote(body)}
-              :nodata ->
-                nil
+              { :ok, unquote(left) } -> throw {:return, unquote(body)}
+              _ -> nil
             end
           end
 
@@ -272,46 +253,38 @@ defmodule ChanProcess do
 
   def loop(state=ChanState[]) do
     receive do
-      { :write, msg={from, ref, data} } ->
-        if match?({ {reader, rref}, t }, Queue.get(state.readers)) do
-          # Someone is already waiting on the channel, so we can unblock the sender
-          reader <- { :ok, rref, data }
-          from <- { :ok, ref }
-          loop(state.readers(t))
-        else
-          # Add the sender to the writers list
-          loop(state.update_writers(Queue.put(&1, msg)))
+      { :write, msg={from, ref, data}, should_block } ->
+        case { Queue.get(state.readers), should_block } do
+          { { {reader, rref}, t }, _ } ->
+            # Someone is already waiting on the channel, so we can unblock the sender
+            reader <- { :ok, rref, data }
+            from <- { :ok, ref }
+            loop(state.readers(t))
+
+          { _, true } ->
+            # Add the sender to the writers list
+            loop(state.update_writers(Queue.put(&1, msg)))
+
+          { _, false } ->
+            from <- { :empty, ref }
+            loop(state)
         end
 
-      { :read, msg={from, ref} } ->
-        if match?({ {writer, wref, data}, t }, Queue.get(state.writers)) do
-          # Someone is waiting in the writing state. Get their value and send them a confirmation.
-          writer <- { :ok, wref }
-          from <- { :ok, ref, data }
-          loop(state.writers(t))
-        else
-          # Add sender to the readers list
-          loop(state.update_readers(Queue.put(&1, msg)))
-        end
+      { :read, msg={from, ref}, should_block } ->
+        case { Queue.get(state.writers), should_block } do
+          { { {writer, wref, data}, t }, _ } ->
+            # Someone is waiting in the writing state. Get their value and send them a confirmation.
+            writer <- { :ok, wref }
+            from <- { :ok, ref, data }
+            loop(state.writers(t))
 
-      { :fast_read, {from, ref} } ->
-        if match?({ {writer, wref, data}, t }, Queue.get(state.writers)) do
-          writer <- { :ok, wref }
-          from <- { :ok, ref, data }
-          loop(state.writers(t))
-        else
-          from <- { :nodata, ref }
-          loop(state)
-        end
+          { _, true } ->
+            # Add sender to the readers list
+            loop(state.update_readers(Queue.put(&1, msg)))
 
-      { :fast_write, {from, ref, data} } ->
-        if match?({ {reader, rref}, t }, Queue.get(state.readers)) do
-          reader <- { :ok, rref, data }
-          from <- { :ok, ref }
-          loop(state.readers(t))
-        else
-          from <- { :noreaders, ref }
-          loop(state)
+          { _, false } ->
+            from <- { :empty, ref }
+            loop(state)
         end
 
       :close ->
