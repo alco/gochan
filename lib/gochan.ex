@@ -160,7 +160,37 @@ defmodule Chan do
     result
   end
 
+  defp new_var() do
+    num = if x = Process.get(:chan_var) do
+      Process.put(:chan_var, x+1)
+      x
+    else
+      Process.put(:chan_var, 1)
+      0
+    end
+    binary_to_atom("chan_var_#{num}")
+  end
+
   defmacro select([do: {:->, _, clauses}]) when is_list(clauses) do
+    {clauses, vars} = Enum.reduce clauses, {[], []}, fn(clause, {clauses, vars}) ->
+      case clause do
+        { [{:<-, info, [left, right]}], body } ->
+          varname = new_var()
+          v = quote do
+            var!(unquote(varname)) = unquote(right)
+          end
+          { [{ [{:<-, info, [left, quote do: var!(unquote(varname))]}], body } | clauses], [v | vars] }
+
+        { [{:<=, info, [left, right]}], body } ->
+          varname = new_var()
+          v = quote do
+            var!(unquote(varname)) = unquote(right)
+          end
+          { [{ [{:<=, info, [left, quote do: var!(unquote(varname))]}], body } | clauses], [v | vars] }
+
+        other -> { [other | clauses], vars }
+      end
+    end
     new_clauses = Enum.reduce clauses, [], fn(clause, acc) ->
       q = case clause do
         { [{:<-, _, [left, right]}], body } ->
@@ -192,8 +222,8 @@ defmodule Chan do
       end
       [q | acc]
     end
-    new_clauses = Enum.reverse(new_clauses)
     quote do
+      unquote(vars)
       f = fn(f) ->
         try do
           unquote_splicing(new_clauses)

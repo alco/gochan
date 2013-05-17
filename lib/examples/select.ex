@@ -15,17 +15,16 @@ defmodule SelectTest do
     require Chan
 
     c = Chan.new
-    spawn(fn -> IO.puts :timer.sleep(500); Chan.read(c) end)
-    tmr = timer(1)
+    spawn(fn -> :timer.sleep(500); IO.puts "I'm done #{Chan.read(c)}" end)
 
     result = Chan.select do
       c <- :value ->
         :ok
-      _ <= tmr ->
+      _ <= timer(1) ->
         :timeout
       #:default ->
         #:default
     end
-    IO.puts result
+    IO.puts "#{inspect self()} result = #{result}"
   end
 end
