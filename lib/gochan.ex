@@ -141,14 +141,36 @@ defmodule Chan do
     result
   end
 
+  def fast_write({chan, _}, data) do
+    ref = make_ref()
+    chan <- { :fast_write, {self(), ref, data} }
+    # Check that the channel exists
+    mref = Process.monitor(chan)
+    result = receive do
+      { :DOWN, ^mref, _, _, _ } ->
+        raise "Channel is closed"
+
+      { :ok, ^ref } ->
+        :ok
+
+      { :noreaders, ^ref } ->
+        :noreaders
+    end
+    Process.demonitor(mref)
+    result
+  end
+
   defmacro select([do: {:->, _, clauses}]) when is_list(clauses) do
     new_clauses = Enum.reduce clauses, [], fn(clause, acc) ->
       q = case clause do
         { [{:<-, _, [left, right]}], body } ->
           # Convert chan <- value to Chan.fast_write(chan, value)
           quote do
-            if :ok == Chan.fast_write(unquote(left), unquote(right)) do
-              throw {:return, unquote(body)}
+            case Chan.fast_write(unquote(left), unquote(right)) do
+              :ok ->
+                throw {:return, unquote(body)}
+              :noreaders ->
+                nil
             end
           end
 
@@ -249,6 +271,16 @@ defmodule ChanProcess do
           loop(state.writers(t))
         else
           from <- { :nodata, ref }
+          loop(state)
+        end
+
+      { :fast_write, {from, ref, data} } ->
+        if match?({ {reader, rref}, t }, Queue.get(state.readers)) do
+          reader <- { :ok, rref, data }
+          from <- { :ok, ref }
+          loop(state.readers(t))
+        else
+          from <- { :noreaders, ref }
           loop(state)
         end
 

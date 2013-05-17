@@ -14,13 +14,14 @@ defmodule SelectTest do
   def test_select() do
     require Chan
 
-    #c = Chan.new
-    c = timer(1)
+    c = Chan.new
+    spawn(fn -> IO.puts :timer.sleep(500); Chan.read(c) end)
+    tmr = timer(1)
 
     result = Chan.select do
-      #c <- :value ->
-        #:ok
-      _ <= c ->
+      c <- :value ->
+        :ok
+      _ <= tmr ->
         :timeout
       #:default ->
         #:default
