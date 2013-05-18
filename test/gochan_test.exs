@@ -193,6 +193,83 @@ defmodule GochanTest do
     # Make sure nothing is leftover after out test
     refute_receive _
   end
+
+  defp timer(seconds) do
+    c = Chan.new
+    spawn(fn ->
+      :timer.sleep(seconds * 1000)
+      Chan.write(c, :ok)
+    end)
+    c
+  end
+
+  test "select" do
+    require Chan
+
+    refute_receive _
+
+    c1 = Chan.new
+    c2 = Chan.new
+
+    spawn(fn -> :timer.sleep(500); Chan.write(c1, :hello) end)
+
+    result = Chan.select do
+      x <= c1 -> x
+      :default -> :default
+    end
+    assert result == :default
+
+    result = Chan.select do
+      x <= c1 -> x
+      c2 <- "ping" -> :okwrite
+      _ <= timer(1) -> :timeout
+    end
+    assert result == :hello
+
+    result = Chan.select do
+      x <= c1 ->
+        x
+      c2 <- "ping" ->
+        :okwrite
+      _ <= timer(1) ->
+        :timeout
+    end
+    assert result == :timeout
+
+    pid = self()
+    spawn(fn -> :timer.sleep(500); pid <- Chan.read(c2) end)
+
+    result = Chan.select do
+      x <= c1 ->
+        x
+      c2 <- "ping" ->
+        :okwrite
+      _ <= timer(1) ->
+        :timout
+    end
+    assert result == :okwrite
+    assert_receive "ping"
+
+    result = Chan.select do
+      x <= c1 ->
+        x
+      c2 <- "ping" ->
+        :okwrite
+      _ <= timer(1) ->
+        :timout
+      :default ->
+        :default
+    end
+    assert result == :default
+
+    Chan.close(c1)
+    Chan.close(c2)
+
+    assert Chan.read(c1) == nil
+    assert Chan.read(c2) == nil
+
+    refute_receive _
+  end
 end
 
 defmodule GochanBufTest do
