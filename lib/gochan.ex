@@ -92,7 +92,11 @@ defmodule Chan do
         nil
 
       { :ok, ^ref, data } ->
-        data
+        if should_block do
+          data
+        else
+          { :ok, data }
+        end
 
       { :empty, ^ref } ->
         :empty
