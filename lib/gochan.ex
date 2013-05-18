@@ -151,38 +151,37 @@ defmodule Chan do
 
   ###
 
-  defp new_var() do
-    num = if x = Process.get(:chan_var) do
-      Process.put(:chan_var, x+1)
-      x
-    else
-      Process.put(:chan_var, 1)
-      0
-    end
-    binary_to_atom("chan_var_#{num}")
+  defp new_var(i) do
+    binary_to_atom("chan_var_#{i}")
   end
 
-  defmacro select([do: {:->, _, clauses}]) when is_list(clauses) do
-    {clauses, vars} = Enum.reduce clauses, {[], []}, fn(clause, {clauses, vars}) ->
+  defp evaluate_clauses(clauses) do
+    # For each clause, replace the second argument with a variable
+    {clauses, vars, _} = Enum.reduce clauses, {[], [], 0}, fn(clause, {clauses, vars, counter}) ->
       case clause do
         { [{:<-, info, [left, right]}], body } ->
-          varname = new_var()
+          varname = new_var(counter)
           v = quote do
             var!(unquote(varname)) = unquote(right)
           end
-          { [{ [{:<-, info, [left, quote do: var!(unquote(varname))]}], body } | clauses], [v | vars] }
+          { [{ [{:<-, info, [left, quote do: var!(unquote(varname))]}], body } | clauses], [v | vars], counter+1 }
 
         { [{:<=, info, [left, right]}], body } ->
-          varname = new_var()
+          varname = new_var(counter)
           v = quote do
             var!(unquote(varname)) = unquote(right)
           end
-          { [{ [{:<=, info, [left, quote do: var!(unquote(varname))]}], body } | clauses], [v | vars] }
+          { [{ [{:<=, info, [left, quote do: var!(unquote(varname))]}], body } | clauses], [v | vars], counter+1 }
 
-        other -> { [other | clauses], vars }
+        other -> { [other | clauses], vars, counter }
       end
     end
-    new_clauses = Enum.reduce clauses, [], fn(clause, acc) ->
+    {clauses, vars}
+  end
+
+  defp transform_clauses(clauses) do
+    # Transforms each select clause into a normal Elixir clause
+    Enum.reduce clauses, [], fn(clause, acc) ->
       q = case clause do
         { [{:<-, _, [left, right]}], body } ->
           # Convert chan <- value to fast_write(chan, value)
@@ -209,12 +208,17 @@ defmodule Chan do
       end
       [q | acc]
     end
+  end
+
+  defp build_select(vars, clauses) do
+    # Initialize vars, then run a recursive loop that goes through each clause
+    # until one returns
     quote do
       unquote(vars)
       f = fn(f) ->
         try do
-          unquote_splicing(new_clauses)
-          :timer.sleep(1)
+          unquote_splicing(clauses)
+          :timer.sleep(10)
           f.(f)
         catch
           { :return, result } ->
@@ -223,6 +227,12 @@ defmodule Chan do
       end
       f.(f)
     end
+  end
+
+  defmacro select([do: {:->, _, clauses}]) when is_list(clauses) do
+    {clauses, vars} = evaluate_clauses(clauses)
+    new_clauses = transform_clauses(clauses)
+    build_select(vars, new_clauses)
   end
 end
 
