@@ -33,11 +33,14 @@ defmodule Chan do
     write(chan, data, true)
   end
 
-  def fast_write(chan, data) do
-    write(chan, data, false)
+  defp fast_write(chan, data) do
+    quote do
+      Chan.write(unquote(chan), unquote(data), false)
+    end
   end
 
-  defp write({chan, _}, data, should_block) do
+  @doc false
+  def write({chan, _}, data, should_block) do
     ref = make_ref()
     chan <- { :write, {self(), ref, data}, should_block }
     # Check that the channel exists
@@ -72,11 +75,14 @@ defmodule Chan do
     read(chan, true)
   end
 
-  def fast_read(chan) do
-    read(chan, false)
+  defp fast_read(chan) do
+    quote do
+      Chan.read(unquote(chan), false)
+    end
   end
 
-  defp read({chan, _}, should_block) do
+  @doc false
+  def read({chan, _}, should_block) do
     ref = make_ref()
     chan <- { :read, {self(), ref}, should_block }
     # Check that the channel exists
@@ -179,18 +185,18 @@ defmodule Chan do
     new_clauses = Enum.reduce clauses, [], fn(clause, acc) ->
       q = case clause do
         { [{:<-, _, [left, right]}], body } ->
-          # Convert chan <- value to Chan.fast_write(chan, value)
+          # Convert chan <- value to fast_write(chan, value)
           quote do
-            case Chan.fast_write(unquote(left), unquote(right)) do
+            case unquote(fast_write(left, right)) do
               :ok -> throw {:return, unquote(body)}
               _ -> nil
             end
           end
 
         { [{:<=, _, [left, right]}], body } ->
-          # Convert var <= chan to var = Chan.fast_read(chan)
+          # Convert var <= chan to var = fast_read(chan)
           quote do
-            case Chan.fast_read(unquote(right)) do
+            case unquote(fast_read(right)) do
               { :ok, unquote(left) } -> throw {:return, unquote(body)}
               _ -> nil
             end
