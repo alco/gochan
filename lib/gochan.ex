@@ -258,6 +258,10 @@ defmodule Queue do
         { val, queue }
     end
   end
+
+  def len(q) do
+    :queue.len(q)
+  end
 end
 
 defmodule ChanProcess do
@@ -320,7 +324,7 @@ defmodule ChanBufProcess do
   Channel process for buffered channels.
   """
 
-  defrecord ChanState, cap: 0, buffer: [], readers: [], writers: []
+  defrecord ChanState, cap: 0, buffer: Queue.new(), readers: Queue.new(), writers: Queue.new()
 
   def init(buffer_size) do
     loop(ChanState.new(cap: buffer_size))
@@ -328,26 +332,28 @@ defmodule ChanBufProcess do
 
   def loop(state=ChanState[]) do
     receive do
-      { :write, msg={from, ref, data} } ->
-        if length(state.buffer) < state.cap do
+      { :write, msg={from, ref, data}, _ } ->
+        if Queue.len(state.buffer) < state.cap do
           from <- { :ok, ref }
-          loop(update_readers(state.update_buffer(&1 ++ [data])))
+          loop(update_readers(state.update_buffer(Queue.put(&1, data))))
         else
           # The buffer if full
-          loop(state.update_writers(&1 ++ [msg]))
+          loop(state.update_writers(Queue.put(&1, msg)))
         end
 
-      { :read, msg={from, ref} } ->
-        if match?([data|t], state.buffer) do
-          from <- { :ok, ref, data }
-          loop(update_writers(state.buffer(t)))
-        else
-          # The buffer is empty
-          loop(state.update_readers(&1 ++ [msg]))
+      { :read, msg={from, ref}, _ } ->
+        case Queue.get(state.buffer) do
+          { data, t } ->
+            from <- { :ok, ref, data }
+            loop(update_writers(state.buffer(t)))
+
+          nil ->
+            # The buffer is empty
+            loop(state.update_readers(Queue.put(&1, msg)))
         end
 
       { :len, from, ref } ->
-        from <- { :ok, ref, length(state.buffer) }
+        from <- { :ok, ref, Queue.len(state.buffer) }
         loop(state)
 
       :close ->
@@ -356,25 +362,24 @@ defmodule ChanBufProcess do
     end
   end
 
-  defp update_readers(state=ChanState[buffer: []]), do: state
-  defp update_readers(state=ChanState[readers: []]), do: state
-  defp update_readers(state=ChanState[buffer: [data|bt], readers: [{from, ref}|rt]]) do
-    from <- { :ok, ref, data }
-    update_readers(state.buffer(bt).readers(rt))
+  defp update_readers(state=ChanState[]) do
+    case { Queue.get(state.buffer), Queue.get(state.readers) } do
+      { nil, _ } -> state
+      { _, nil } -> state
+      { {data, bt}, { {from, ref}, rt } } ->
+        from <- { :ok, ref, data }
+        state.buffer(bt).readers(rt)
+    end
   end
 
-  defp update_writers(state=ChanState[writers: []]), do: state
-  defp update_writers(state=ChanState[writers: [{from, ref, data}|wt]]) do
+  defp update_writers(state=ChanState[]) do
     # We assume that length(state.buffer) == state.cap - 1
-    from <- { :ok, ref }
-    state.update_buffer(&1 ++ [data]).writers(wt)
-
-    #if length(state.buffer) < state.cap do
-      #from <- { :ok, ref }
-      #update_writers(state.update_buffer(&1 ++ [data]).writers(wt))
-    #else
-      #state
-    #end
+    case Queue.get(state.writers) do
+      nil -> state
+      { {from, ref, data}, wt } ->
+        from <- { :ok, ref }
+        state.update_buffer(Queue.put(&1, data)).writers(wt)
+    end
   end
 end
 

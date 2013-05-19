@@ -289,7 +289,8 @@ defmodule GochanBufTest do
 
     pid = self()
     Enum.each 1..10, fn n ->
-      spawn(fn -> :timer.sleep(n*100); pid <- Chan.read(c) end)
+      :timer.sleep((n-1)*10)
+      spawn(fn -> pid <- Chan.read(c) end)
     end
     refute_receive _
 
@@ -299,6 +300,8 @@ defmodule GochanBufTest do
     end
 
     Chan.close(c)
+
+    refute_receive _
   end
 
   test "read at once" do
@@ -313,6 +316,8 @@ defmodule GochanBufTest do
       spawn(fn -> pid <- Chan.read(c) end)
       assert_receive ^n
     end
+
+    refute_receive _
   end
 end
 
