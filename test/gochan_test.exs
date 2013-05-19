@@ -274,5 +274,45 @@ end
 
 defmodule GochanBufTest do
   use ExUnit.Case
+
+  test "read write" do
+    c = Chan.new(1)
+
+    assert Chan.write(c, "hello") == :ok
+    assert Chan.read(c) == "hello"
+
+    Chan.close(c)
+  end
+
+  test "interactive" do
+    c = Chan.new(10)
+
+    pid = self()
+    Enum.each 1..10, fn n ->
+      spawn(fn -> :timer.sleep(n*100); pid <- Chan.read(c) end)
+    end
+    refute_receive _
+
+    Enum.each 1..10, fn n ->
+      Chan.write(c, n)
+      assert_receive ^n
+    end
+
+    Chan.close(c)
+  end
+
+  test "read at once" do
+    c = Chan.new(10)
+
+    Enum.each 1..10, fn n ->
+      Chan.write(c, n)
+    end
+
+    pid = self()
+    Enum.each 1..10, fn n ->
+      spawn(fn -> pid <- Chan.read(c) end)
+      assert_receive ^n
+    end
+  end
 end
 
