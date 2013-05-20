@@ -8,12 +8,8 @@ defmodule Chan do
   writing to it will block the writing process until someone reads from the
   channel on the other end.
   """
-  def new() do
-    { spawn(ChanProcess, :init, []), 0 }
-  end
-
-  def new(buffer_size) do
-    { spawn(ChanBufProcess, :init, [buffer_size]), buffer_size }
+  def new(buffer_size // 0) when buffer_size >= 0 do
+    { spawn(ChanProcess, :init, [buffer_size]), buffer_size }
   end
 
   @doc """
@@ -269,61 +265,6 @@ defmodule ChanProcess do
   Channel process for unbuffered channels.
   """
 
-  defrecord ChanState, readers: Queue.new(), writers: Queue.new()
-
-  def init() do
-    loop(ChanState.new())
-  end
-
-  def loop(state=ChanState[]) do
-    receive do
-      { :write, msg={from, ref, data}, should_block } ->
-        case { Queue.get(state.readers), should_block } do
-          { { {reader, rref}, t }, _ } ->
-            # Someone is already waiting on the channel, so we can unblock the sender
-            reader <- { :ok, rref, data }
-            from <- { :ok, ref }
-            loop(state.readers(t))
-
-          { _, true } ->
-            # Add the sender to the writers list
-            loop(state.update_writers(Queue.put(&1, msg)))
-
-          { _, false } ->
-            from <- { :empty, ref }
-            loop(state)
-        end
-
-      { :read, msg={from, ref}, should_block } ->
-        case { Queue.get(state.writers), should_block } do
-          { { {writer, wref, data}, t }, _ } ->
-            # Someone is waiting in the writing state. Get their value and send them a confirmation.
-            writer <- { :ok, wref }
-            from <- { :ok, ref, data }
-            loop(state.writers(t))
-
-          { _, true } ->
-            # Add sender to the readers list
-            loop(state.update_readers(Queue.put(&1, msg)))
-
-          { _, false } ->
-            from <- { :empty, ref }
-            loop(state)
-        end
-
-      :close ->
-        # quit the process
-        :ok
-    end
-  end
-end
-
-
-defmodule ChanBufProcess do
-  @moduledoc """
-  Channel process for buffered channels.
-  """
-
   defrecord ChanState, cap: 0, buffer: Queue.new(), readers: Queue.new(), writers: Queue.new()
 
   def init(buffer_size) do
@@ -332,55 +273,90 @@ defmodule ChanBufProcess do
 
   def loop(state=ChanState[]) do
     receive do
-      { :write, msg={from, ref, data}, _ } ->
-        if Queue.len(state.buffer) < state.cap do
+      { :write, {from, ref, data}, _should_block } ->
+        state = state.update_buffer(Queue.put(&1, {ref, data}))
+        if Queue.len(state.buffer) <= state.cap do
           from <- { :ok, ref }
-          loop(update_readers(state.update_buffer(Queue.put(&1, data))))
         else
-          # The buffer if full
-          loop(state.update_writers(Queue.put(&1, msg)))
+          state = state.update_writers(Queue.put(&1, {from, ref}))
         end
+        loop(update_state(state))
+        #case { Queue.get(state.readers), should_block } do
+          #{ { {reader, rref}, t }, _ } ->
+            ## Someone is already waiting on the channel, so we can unblock the sender
+            #reader <- { :ok, rref, data }
+            #from <- { :ok, ref }
+            #loop(state.readers(t))
 
-      { :read, msg={from, ref}, _ } ->
-        case Queue.get(state.buffer) do
-          { data, t } ->
-            from <- { :ok, ref, data }
-            loop(update_writers(state.buffer(t)))
+          #{ _, true } ->
+            ## Add the sender to the writers list
+            #loop(state.update_writers(Queue.put(&1, msg)))
 
-          nil ->
-            # The buffer is empty
-            loop(state.update_readers(Queue.put(&1, msg)))
-        end
+          #{ _, false } ->
+            #from <- { :empty, ref }
+            #loop(state)
+        #end
+
+      { :read, msg={_, _}, _should_block } ->
+        state = state.update_readers(Queue.put(&1, msg))
+        loop(update_state(state))
+        #case { Queue.get(state.writers), should_block } do
+          #{ { {writer, wref, data}, t }, _ } ->
+            ## Someone is waiting in the writing state. Get their value and send them a confirmation.
+            #writer <- { :ok, wref }
+            #from <- { :ok, ref, data }
+            #loop(state.writers(t))
+
+          #{ _, true } ->
+            ## Add sender to the readers list
+            #loop(state.update_readers(Queue.put(&1, msg)))
+
+          #{ _, false } ->
+            #from <- { :empty, ref }
+            #loop(state)
+        #end
 
       { :len, from, ref } ->
-        from <- { :ok, ref, Queue.len(state.buffer) }
+        len = max(0, Queue.len(state.buffer) - Queue.len(state.writers))
+        from <- { :ok, ref, len }
         loop(state)
 
       :close ->
-        # do nothing to quit the process
+        # quit the process
         :ok
     end
   end
 
-  defp update_readers(state=ChanState[]) do
+  # Both state.readers and state.writers can be empty, but all three of
+  # { state.buffer, state.readers, state.writers } cannot be empty at the
+  # same time.
+  #
+  # Possible patterns include:
+  #
+  #  { nil, ..., nil }  # nothing changes
+  #  { ..., nil, nil }  # nothing changes
+  #  { ..., nil, ... }  # nothing changes
+  #  { ..., ..., nil }  # unblock reader and reduce buffer
+  #  { ..., ..., ... }  # unblock reader, unblock writer, and reduce buffer
+  #
+  def update_state(state) do
     case { Queue.get(state.buffer), Queue.get(state.readers) } do
       { nil, _ } -> state
       { _, nil } -> state
-      { {data, bt}, { {from, ref}, rt } } ->
-        from <- { :ok, ref, data }
-        state.buffer(bt).readers(rt)
-    end
-  end
 
-  defp update_writers(state=ChanState[]) do
-    # We assume that length(state.buffer) == state.cap - 1
-    case Queue.get(state.writers) do
-      nil -> state
-      { {from, ref, data}, wt } ->
-        from <- { :ok, ref }
-        state.update_buffer(Queue.put(&1, data)).writers(wt)
+      { { {wref, data}, bt }, { {reader, ref}, rt } } ->
+        reader <- { :ok, ref, data }
+        state = state.readers(rt).buffer(bt)
+
+        # See if we should unblock any writers
+        case Queue.get(state.writers) do
+          { {from, ^wref}, wt } ->
+            from <- { :ok, wref }
+            state.writers(wt)
+
+          _ ->
+            state
+        end
     end
   end
 end
-
-
