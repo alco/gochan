@@ -339,9 +339,13 @@ defmodule GochanBufTest do
       Chan.write(c, n)
       assert Chan.len(c) === n
     end
-    spawn(fn -> Chan.write(c, :ok) end)
+    pid = self()
+    spawn(fn -> Chan.write(c, :ok); pid <- :finished end)
     :timer.sleep(100)
     assert Chan.len(c) === 3
+    assert Chan.read(c) === 1
+    assert Chan.len(c) === 3
+    assert_receive :finished
 
     Chan.close(c)
     #assert Chan.len(c) === 3

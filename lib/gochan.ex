@@ -317,7 +317,7 @@ defmodule ChanProcess do
         #end
 
       { :len, from, ref } ->
-        len = max(0, Queue.len(state.buffer) - Queue.len(state.writers))
+        len = min(Queue.len(state.buffer), state.cap)
         from <- { :ok, ref, len }
         loop(state)
 
@@ -349,8 +349,13 @@ defmodule ChanProcess do
         state = state.readers(rt).buffer(bt)
 
         # See if we should unblock any writers
-        case Queue.get(state.writers) do
-          { {from, ^wref}, wt } ->
+        cap = state.cap
+        case { Queue.get(state.writers), Queue.len(state.buffer) - Queue.len(state.writers) } do
+          { { {from, ^wref}, wt }, _ } ->
+            from <- { :ok, wref }
+            state.writers(wt)
+
+          { { {from, wref}, wt }, diff } when diff < cap ->
             from <- { :ok, wref }
             state.writers(wt)
 
