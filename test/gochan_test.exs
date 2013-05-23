@@ -65,6 +65,18 @@ defmodule GochanTest do
     refute_receive _
   end
 
+  test "close raises writers" do
+    c = Chan.new
+    pid = self()
+
+    Enum.each 1..3, fn _ ->
+      spawn(fn -> pid <- Chan.write(c, :hello) end)
+    end
+    refute_receive _
+
+    Chan.close(c)
+  end
+
   test "read block" do
     # Make sure nothing is leftover from previous test
     refute_receive _
