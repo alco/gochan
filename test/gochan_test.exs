@@ -34,6 +34,22 @@ defmodule GochanTest do
     refute_receive _
   end
 
+  test "close unblocks readers" do
+    c = Chan.new
+    pid = self()
+
+    Enum.each 1..3, fn _ ->
+      spawn(fn -> pid <- Chan.read(c) end)
+    end
+    refute_receive _
+
+    Chan.close(c)
+    assert_receive nil
+    assert_receive nil
+    assert_receive nil
+    refute_receive _
+  end
+
   test "close write" do
     # Make sure nothing is leftover from previous test
     refute_receive _
