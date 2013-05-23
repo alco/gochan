@@ -45,6 +45,9 @@ defmodule Chan do
       { :DOWN, ^mref, _, _, _ } ->
         raise "Channel is closed"
 
+      { :closed, ^ref } ->
+        raise "Channel is closed"
+
       { :ok, ^ref } ->
         :ok
 
@@ -85,6 +88,9 @@ defmodule Chan do
     mref = Process.monitor(chan)
     result = receive do
       { :DOWN, ^mref, _, _, _ } ->
+        nil
+
+      { :closed, ^ref } ->
         nil
 
       { :ok, ^ref, data } ->
@@ -265,7 +271,7 @@ defmodule ChanProcess do
   Channel process for unbuffered channels.
   """
 
-  defrecord ChanState, cap: 0, buffer: Queue.new(), readers: Queue.new(), writers: Queue.new()
+  defrecord ChanState, closed: false, cap: 0, buffer: Queue.new(), readers: Queue.new(), writers: Queue.new()
 
   def init(buffer_size) do
     loop(ChanState.new(cap: buffer_size))
@@ -274,13 +280,18 @@ defmodule ChanProcess do
   def loop(state=ChanState[]) do
     receive do
       { :write, {from, ref, data}, _should_block } ->
-        state = state.update_buffer(Queue.put(&1, {ref, data}))
-        if Queue.len(state.buffer) <= state.cap do
-          from <- { :ok, ref }
+        if state.closed do
+          from <- { :closed, ref }
+          loop(state)
         else
-          state = state.update_writers(Queue.put(&1, {from, ref}))
+          state = state.update_buffer(Queue.put(&1, {ref, data}))
+          if Queue.len(state.buffer) <= state.cap do
+            from <- { :ok, ref }
+          else
+            state = state.update_writers(Queue.put(&1, {from, ref}))
+          end
+          loop(update_state(state))
         end
-        loop(update_state(state))
         #case { Queue.get(state.readers), should_block } do
           #{ { {reader, rref}, t }, _ } ->
             ## Someone is already waiting on the channel, so we can unblock the sender
@@ -322,8 +333,18 @@ defmodule ChanProcess do
         loop(state)
 
       :close ->
-        # quit the process
-        :ok
+        Enum.each :queue.to_list(state.writers), fn {w, ref} ->
+          w <- { :closed, ref }
+        end
+        Enum.each :queue.to_list(state.readers), fn {r, ref} ->
+          r <- { :closed, ref }
+        end
+        if Queue.len(state.buffer) === 0 do
+          # quit the process
+          :ok
+        else
+          loop(state.readers(Queue.new()).writers(Queue.new()).closed(true))
+        end
     end
   end
 
@@ -341,7 +362,14 @@ defmodule ChanProcess do
   #
   def update_state(state) do
     case { Queue.get(state.buffer), Queue.get(state.readers) } do
-      { nil, _ } -> state
+      { nil, { {reader, ref}, rt } } ->
+        if state.closed do
+          reader <- { :closed, ref }
+          state.readers(rt)
+        else
+          state
+        end
+
       { _, nil } -> state
 
       { { {wref, data}, bt }, { {reader, ref}, rt } } ->

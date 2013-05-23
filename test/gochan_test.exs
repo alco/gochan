@@ -348,11 +348,11 @@ defmodule GochanBufTest do
     assert_receive :finished
 
     Chan.close(c)
-    #assert Chan.len(c) === 3
-    #assert Chan.read(c) === 1
-    #assert Chan.read(c) === 2
-    #assert Chan.read(c) === 3
-    #assert Chan.read(c) === nil
+    assert Chan.len(c) === 3
+    assert Chan.read(c) === 2
+    assert Chan.read(c) === 3
+    assert Chan.read(c) === :ok
+    assert Chan.read(c) === nil
   end
 end
 
