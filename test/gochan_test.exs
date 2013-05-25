@@ -70,9 +70,18 @@ defmodule GochanTest do
     pid = self()
 
     Enum.each 1..3, fn _ ->
-      spawn(fn -> pid <- Chan.write(c, :hello) end)
+      spawn(fn ->
+        try do
+          pid <- Chan.write(c, :hello)
+        rescue
+          RuntimeError ->
+            pid <- :error
+        end
+      end)
     end
-    refute_receive _
+    refute_receive :error
+    refute_receive :error
+    refute_receive :error
 
     Chan.close(c)
   end
