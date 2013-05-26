@@ -308,8 +308,8 @@ defmodule ChanProcess do
             #loop(state)
         #end
 
-      { :read, msg={_, _}, _should_block } ->
-        state = state.update_readers(Queue.put(&1, msg))
+      { :read, {from, ref}, should_block } ->
+        state = state.update_readers(Queue.put(&1, {from, ref, should_block}))
         loop(update_state(state))
         #case { Queue.get(state.writers), should_block } do
           #{ { {writer, wref, data}, t }, _ } ->
@@ -336,7 +336,7 @@ defmodule ChanProcess do
         Enum.each :queue.to_list(state.writers), fn {w, ref} ->
           w <- { :closed, ref }
         end
-        Enum.each :queue.to_list(state.readers), fn {r, ref} ->
+        Enum.each :queue.to_list(state.readers), fn {r, ref, _} ->
           r <- { :closed, ref }
         end
         if Queue.len(state.buffer) === 0 do
@@ -362,17 +362,22 @@ defmodule ChanProcess do
   #
   def update_state(state) do
     case { Queue.get(state.buffer), Queue.get(state.readers) } do
-      { nil, { {reader, ref}, rt } } ->
+      { nil, { {reader, ref, should_block}, rt } } ->
         if state.closed do
           reader <- { :closed, ref }
           state.readers(rt)
         else
-          state
+          if should_block do
+            state
+          else
+            reader <- { :empty, ref }
+            state.readers(rt)
+          end
         end
 
       { _, nil } -> state
 
-      { { {wref, data}, bt }, { {reader, ref}, rt } } ->
+      { { {wref, data}, bt }, { {reader, ref, _}, rt } } ->
         reader <- { :ok, ref, data }
         state = state.readers(rt).buffer(bt)
 
