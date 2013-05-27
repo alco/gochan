@@ -268,6 +268,43 @@ defmodule GochanTest do
   end
 
   test "select multiple read" do
+    require Chan
+
+    refute_receive _
+
+    c1 = Chan.new
+    c2 = Chan.new
+    pid = self()
+    child1 = spawn(fn -> :timer.sleep(1000); pid <- {self(), Chan.write(c1, :world)} end)
+    child2 = spawn(fn -> :timer.sleep(500); pid <- {self(), Chan.write(c2, :hello)} end)
+
+    result = Chan.select do
+      x <= c1 -> x
+      x <= c2 -> x
+      :default -> :default
+    end
+    assert result == :default
+
+    :timer.sleep(600)
+    result = Chan.select do
+      x <= c1 -> x
+      x <= c2 -> x
+      :default -> :default
+    end
+    assert result == :hello
+    assert_receive {^child2, :ok}
+
+    :timer.sleep(500)
+    result = Chan.select do
+      x <= c1 -> x
+      x <= c2 -> x
+      :default -> :default
+    end
+    assert result == :world
+    assert_receive {^child1, :ok}
+
+    Chan.close(c1)
+    Chan.close(c2)
   end
 
   test "select write" do
