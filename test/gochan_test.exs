@@ -308,14 +308,15 @@ defmodule GochanTest do
   end
 
   test "select write" do
-    #c2 = Chan.new
+    require Chan
 
-    #result = Chan.select do
-      #x <= c1 -> x
-      #c2 <- "ping" -> :okwrite
-      #_ <= timer(1) -> :timeout
-    #end
-    #assert result == :hello
+    c2 = Chan.new
+
+    result = Chan.select do
+      c2 <- "ping" -> :okwrite
+      _ <= timer(1) -> :timeout
+    end
+    assert result == :hello
 
     #result = Chan.select do
       #x <= c1 ->
@@ -354,7 +355,7 @@ defmodule GochanTest do
     #assert result == :default
 
     #Chan.close(c1)
-    #Chan.close(c2)
+    Chan.close(c2)
 
     #assert Chan.read(c1) == nil
     #assert Chan.read(c2) == nil
