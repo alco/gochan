@@ -318,6 +318,25 @@ defmodule GochanTest do
     end
     assert result == :hello
 
+    Chan.close(c2)
+  end
+
+  test "select multiple write" do
+    require Chan
+
+    c1 = Chan.new
+    c2 = Chan.new
+
+    result = Chan.select do
+      c1 <- "ping" -> :okwrite
+      c2 <- "pong" -> :okwrite
+      :default -> :default
+    end
+    assert result == :default
+
+    Chan.close(c1)
+    Chan.close(c2)
+
     #result = Chan.select do
       #x <= c1 ->
         #x
@@ -355,7 +374,6 @@ defmodule GochanTest do
     #assert result == :default
 
     #Chan.close(c1)
-    Chan.close(c2)
 
     #assert Chan.read(c1) == nil
     #assert Chan.read(c2) == nil
