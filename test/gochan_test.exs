@@ -334,6 +334,17 @@ defmodule GochanTest do
     end
     assert result == :default
 
+    pid = self()
+    spawn(fn -> pid <- Chan.read(c2) end)
+
+    result = Chan.select do
+      c1 <- "ping" -> :okwrite1
+      c2 <- "pong" -> :okwrite2
+      _ <= timer(1) -> :timeout
+    end
+    assert result == :okwrite2
+    assert_receive "pong"
+
     Chan.close(c1)
     Chan.close(c2)
 
