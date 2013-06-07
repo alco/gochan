@@ -347,6 +347,7 @@ defmodule GochanTest do
 
     Chan.close(c1)
     Chan.close(c2)
+  end
 
     #result = Chan.select do
       #x <= c1 ->
@@ -390,7 +391,6 @@ defmodule GochanTest do
     #assert Chan.read(c2) == nil
 
     #refute_receive _
-  end
 end
 
 defmodule GochanBufTest do
