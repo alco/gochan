@@ -470,4 +470,3 @@ defmodule GochanBufTest do
     assert Chan.read(c) === nil
   end
 end
-
