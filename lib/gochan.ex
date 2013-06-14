@@ -21,8 +21,8 @@ defmodule Chan do
   Writing to a nil channel blocks forever.
   """
   def write(nil, _) do
-    #receive do
-    #end
+    receive do
+    end
   end
 
   def write(chan, data) do
@@ -66,8 +66,8 @@ defmodule Chan do
   Reading from a closed channel returns nil.
   """
   def read(nil) do
-    #receive do
-    #end
+    receive do
+    end
   end
 
   def read(chan) do
