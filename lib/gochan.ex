@@ -165,14 +165,14 @@ defmodule Chan do
     # For each clause, replace the second argument with a variable
     {clauses, vars, _} = Enum.reduce clauses, {[], [], 0}, fn(clause, {clauses, vars, counter}) ->
       case clause do
-        { [{:<-, info, [left, right]}], body } ->
+        { [{:<-, info, [left, right]}], _, body } ->
           varname = new_var(counter)
           v = quote do
             var!(unquote(varname)) = unquote(right)
           end
           { [{ [{:<-, info, [left, quote do: var!(unquote(varname))]}], body } | clauses], [v | vars], counter+1 }
 
-        { [{:<=, info, [left, right]}], body } ->
+        { [{:<=, info, [left, right]}], _, body } ->
           varname = new_var(counter)
           v = quote do
             var!(unquote(varname)) = unquote(right)
